@@ -1,0 +1,54 @@
+heat_template_version: 2013-05-23                                    #verzija sintakse koristena u skripti
+
+#ovo je pod-skripta koju nadskripta skripta6.yaml koristi za stvaranje load balancer servera
+#u svrhu auto scalinga
+description: A load-balancer server                                  #opcionalni opis skripte
+
+
+parameters:                                                          #u ovu sekciju kopiraju se argumenti preneseni iz nad-skripte
+  image:                                                             #parametar image
+    type: string                                                     #tip parametra
+    description: Image used for servers                              #opis parametra
+  key_name:                                                          #parametar key_name
+    type: string
+    description: SSH key to connect to the servers                   #opis parametra
+  flavor:                                                            #parametar flavor
+    type: string                                                     #tip parametra
+    description: flavor used by the servers                          #opis parametra
+  pool_id:                                                           #parametar pool_id
+    type: string                                                     #tip parametra
+    description: Pool to contact                                     #opis parametra
+  user_data:                                                         #parametar user_data
+    type: string                                                     #tip parametra
+    description: Server user_data                                    #opis parametra
+  metadata:                                                          #parametar metadata
+    type: json                                                       #tip parametra
+  network:                                                           #parametar network
+    type: string                                                     #tip parametra
+    description: Network used by the server                          #opis parametra
+
+resources:                                                           #novi objekti (resursi) definirani nazivima
+  server:                                                            #resurs (instanca) koja ce sluziti kao load balancer server 
+    type: OS::Nova::Server                                           #tip resusrsa, nova server tj. kreiranje instance
+    properties:                                                      #svojstva resursa
+      flavor: {get_param: flavor}                                    #dohvacanje flavora instance (specificirano u nad-skripti)
+      image: {get_param: image}                                      #dohvacanje image-a instance (specificirano u nad-skripti)
+      key_name: {get_param: key_name}                                #dohvacanje naziva key datoeke instance za spajanje na ssh (specificirano u nad-skripti)
+      metadata: {get_param: metadata}                                #dohvacanje meta podataka instance (specificirano u nad-skripti)
+      user_data: {get_param: user_data}                              #dohvacanje startup koda koji ce se izvrsiti nakon deploy-a instance (specificirano u nad-skripti)
+      user_data_format: RAW                                          #tip start-up koda koji ce se izvrsiti prilikom pokretanja instance RAW- kod bez dodatnih modifikacija
+      networks: [{network: {get_param: network} }]                   #dohvacanje mreze instance (specificirano u nad-skripti)
+  member:                                                            #resurs koji specificira pool (bazen) u kojem se nalazi LB server
+    type: OS::Neutron::PoolMember                                    #tip resurs, neutron PoolMember
+    properties:                                                      #svojstva poolmember-a
+      pool_id: {get_param: pool_id}                                  #dohvacanje pool-id-a (specificirano u nad-skripti)
+      address: {get_attr: [server, first_address]}                   #dohvacanje ip-adrese prethodno kreirane instance
+      protocol_port: 80                                              #port koji protokol koristi
+
+outputs:                                                             #izlazni podaci koji se ispisuju nakon kreacije instance
+  server_ip:                                                         #ip adresa LB servera
+    description: IP Address of the load-balanced server.             #opis
+    value: { get_attr: [server, first_address] }                     #dohvacanje ip adrese prethodno kreirane instance
+  lb_member:                                                         #detalji poola u kojem se nalai instanca
+    description: LB member details.                                  #opis
+    value: { get_attr: [member, show] }                              #dohvacanje detalja pretpodno kreirano pool-a

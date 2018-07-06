@@ -1,0 +1,65 @@
+heat_template_version: 2013-05-23                                 #verzija sintakse koristena u skripti
+
+#ova skirpta demonstrira nacin kako automatizirati deployment web usluga 
+#te njihovo povezivanje
+#sripta takoder kreira floating IP adrese i veze ih za kreirane Service i Client instance
+
+parameters:                                                                     #definicija parametara koje korisnik moze unjeti
+  image:                                                                        #parametar image
+    type: string                                                                #tip parametra
+    label: Image name or ID                                                     #oznaka parametra
+    description: Image to be used for server. Please use an Ubuntu based image. #opis parametra
+    default: ubuntu_cloud14                                                     #vrijednost koja se uzima ako korisnik ne unese nista
+  flavor:                                                                       #parametar flavor
+    type: string                                                                #tip parametra
+    label: Flavor                                                               #oznaka parametra
+    description: Type of instance (flavor) to be used on the compute instance.  #opis parametra
+    default: m1.small                                                           #vrijednost koja se uzima ako korisnik ne unese nista
+  key:                                                                          #parametar flavor
+    type: string                                                                #tip parametra
+    label: Key name                                                             #oznaka parametra
+    description: Name of key-pair to be installed on the compute instance.      #opis parametra
+    default: my_key1                                                            #vrijednost koja se uzima ako korisnik ne unese nista
+  private_network:                                                              #parametar flavor
+    type: string                                                                #tip parametra
+    label: Private network name or ID                                           #oznaka parametra
+    description: Network to attach server to.                                   #opis parametra
+    default: my_net1                                                            #vrijednost koja se uzima ako korisnik ne unese nista
+  public_network:                                                               #parametar flavor
+    type: string                                                                #tip parametra
+    label: Public network name or ID                                            #oznaka parametra
+    description: Network to attach server to.                                   #opis parametra
+    default: public                                                             #vrijednost koja se uzima ako korisnik ne unese nista
+
+
+resources:                                                                      #novi objekti (resursi) definirani nazivima 
+  security_group:                                                               #naziv prvog resursa (sigurnosna grupa)
+    type: OS::Neutron::SecurityGroup                                            #tip prvog resursa, sigurnosna grupa neutron modula
+    properties:                                                                 #svojstva ovog resursa
+      name: LAMP_security_group                                                 #naziv
+      rules:                                                                    #definicija pravila sigurnosne grupe
+        - port_range_min: 80                                                    #port range
+          port_range_max: 80                                                    
+          protocol: tcp                                                         #protokol za ingress promet
+          direction: ingress                                                    #vrsta mreznog prometa, promet koji dolazi izvana 
+        - port_range_min: 80                                                    #port range
+          port_range_max: 80
+          protocol: tcp                                                         #protokol za egress promet
+          direction: egress                                                     #vrsta mreznog prometa, promet koji iznutra ide prema van 
+  service:                                                                      #instanca koja pogoni web servis
+    type: https://raw.githubusercontent.com/nikoladom91/ARIKS2016/master/Skripte/Heat/resursi/service.yaml    #pod-skripta, tj. vlastiti tip resursa koji sami definiramo (u ovom slucaju radi se servisu)
+    properties:                                                                 #elementi ove sekcije prosljeduju se kao parametri pod-skripti
+      image: { get_param: image }                                               #dohvacanje parametra image i prosljedivanje istog pod-skripti
+      flavor: { get_param: flavor }                                             #dohvacanje parametra flavor i prosljedivanje istog pod-skripti
+      key: { get_param: key }                                                   #dohvacanje parametra key i prosljedivanje istog pod-skripti
+      private_network: { get_param: private_network }                           #dohvacanje parametra private_network i prosljedivanje istog pod-skripti
+      security_group: { get_resource: security_group }                          #dohvacanje parametra security_group i prosljedivanje istog pod-skripti
+  client:                                                                       #instanca koja dohvaca WSDL datoteku sa service instance te puem nje koristi metode web servisa
+    type: https://raw.githubusercontent.com/nikoladom91/ARIKS2016/master/Skripte/Heat/resursi/client.yaml     #pod-skripta, tj. vlastiti tip resursa koji sami definiramo (u ovom slucaju radi se klijentu)
+    properties:                                                                 #elementi ove sekcije prosljeduju se kao parametri pod-skripti
+      image: { get_param: image }                                               #dohvacanje parametra image i prosljedivanje istog pod-skripti
+      flavor: { get_param: flavor }                                             #dohvacanje parametra flavor i prosljedivanje istog pod-skripti
+      key: { get_param: key }                                                   #dohvacanje parametra key i prosljedivanje istog pod-skripti
+      private_network: { get_param: private_network }                           #dohvacanje parametra private_network i prosljedivanje istog pod-skripti
+      service_server: { get_attr: [service, ip] }                               #dohvacanje ip adrese resursa servis, kreiranog u prethodnoj sekciji
+      security_group: { get_resource: security_group }                          #dohvacanje parametra sigurnosne grupe i prosljedivanje istog pod-skripti

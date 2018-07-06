@@ -1,0 +1,70 @@
+
+heat_template_version: 2013-05-23                                #verzija sintakse koristena u skripti
+
+#ova skripta stvara tri nova resursa, dve instance i jedan random number generator
+description: Simple template to deploy a single compute instance #opcionalni opis skripte
+
+parameters:                                                       #definicija parametara koje korisnik moze unjeti
+  name:                                                           #parametar name
+    type: string                                                  #tip parametra
+    label: Users name                                             #oznaka parametra
+    description: Who is startng this script?                      #opis parametra
+    default: John                                                 #vrijednost koja se uzima ako korisnik ne unese nista
+  image:                                                          #parametar image
+    type: string                                                  #tip parametra
+    label: Image name or ID                                       #oznaka parametra
+    description: Image to be used for compute instance            #opis parametra
+    default: ubuntu_cloud14                                       #vrijednost koja se uzima ako korisnik ne unese nista
+  flavor:                                                         #parametar flavor
+    type: string                                                  #tip parametra
+    label: Flavor                                                 #oznaka parametra
+    description: Type of instance (flavor) to be used             #opis parametra
+    default: m1.small                                             #vrijednost koja se uzima ako korisnik ne unese nista
+  key:                                                            #parametar key
+    type: string                                                  #tip parametra
+    label: Key name                                               #oznaka parametra
+    description: Name of key-pair to be used for compute instance   #opis parametra
+    default: my_key1                                              #vrijednost koja se uzima ako korisnik ne unese nista
+  private_network:                                                #parametar private_network   
+    type: string                                                  #tip parametra
+    label: Private network name or ID                             #oznaka parametra
+    description: Network to attach instance to.                   #opis parametra
+    default: my_net1                                              #vrijednost koja se uzima ako korisnik ne unese nista
+
+
+resources:                                                         #novi objekti (resursi) definirani nazivima 
+  rng:                                                             #naziv prvog resursa
+    type: OS::Heat::RandomString                                   #tip prvog resursa
+    properties:                                                    #svojstva prvog resursa
+      length: 4                                                    #duljina random stringa
+      sequence: digits                                             #tip svakog random znaka
+  inst_simple:                                                     #naziv drugog resursa
+    type: OS::Nova::Server                                         #tip drugog resursa
+    properties:                                                    #svojstva drugog resursa                      
+      image: { get_param: image }                                  #dohvacanje parametra image i dodjeljivanje istog svojstvu image
+      flavor: { get_param: flavor }                                #dohvacanje parametra flavor i dodjeljivanje istog svojstvu flavor
+      key_name: { get_param: key }                                 #dohvacanje parametra key i dodjeljivanje istog svojstvu key
+      networks:
+        - network: { get_param: private_network }          #dohvacanje parametra private_network i dodjeljivanje istog svojstvu network
+      user_data_format: RAW                                        #tip start-up koda koji ce se izvrsiti prilikom pokretanja instance RAW- kod bez dodatnih modifikacija
+      user_data: |                                                 #definicija start-up koda koji u datoteku hello.txt zapisuje Hello,World!                                                                                 
+        #!/bin/sh
+        echo "Hello, World!" >> hello.txt                          
+  inst_advanced:                                                   #naziv treceg resursa
+    type: OS::Nova::Server                                         #tip treceg resursa
+    properties:                                                    #svojstva treceg resursa
+      image: { get_param: image }                                  #dohvacanje parametra image i dodjeljivanje istog svojstvu image
+      flavor: { get_param: flavor }                                #dohvacanje parametra flavor i dodjeljivanje istog svojstvu flavor
+      key_name: { get_param: key }                                 #dohvacanje parametra key i dodjeljivanje istog svojstvu key
+      networks:
+        - network: { get_param: private_network }          #dohvacanje parametra private_network i dodjeljivanje istog svojstvu network
+      user_data_format: RAW                                #tip start-up koda koji ce se izvrsiti prilikom pokretanja instance RAW- kod bez dodatnih modifikacija
+      user_data:                                           #definicija start-up koda koji u datoteku zapisuje vrijednosti dohvacene putem heat skripte
+        str_replace:                                       #metoda za dohvacanje vrijednosti
+          params:                                          
+            __name__: { get_param: name }                  #dohvacanje parametra name i dodjeljivanje istog varaijabli __name__
+            __rnum__: { get_attr: [rng, value] }           #dohvacanje vrijednosti generirane od random number generatora i dodjeljivanje iste varaijabli __rnum__
+          template: |                                      # predlozak bash skripte u kojoj se dohvacene vrijednosti zapisuju u datoteku hello.txt 
+            #!/bin/sh
+            echo "Hello, World!" >> ahello.txt
+            echo "Hello, my name is __name__. Here is a random number: __rnum__." >> hello.txt

@@ -1,0 +1,48 @@
+heat_template_version: 2013-05-23                                    #verzija sintakse koristena u skripti
+# ova skripta kreira dvije instance
+#prva instanca pokrece i konfigurira mysql bazu podataka
+#druga instanca pokrece wordpress web uslugu koja koristi bazu podataka prve instance
+
+parameters:                                                                        #definicija parametara koje korisnik moze unjeti
+  image:                                                                           #parametar image
+    type: string                                                                   #tip parametra
+    label: Image name or ID                                                        #oznaka parametra
+    description: Image to be used for server. Please use an Ubuntu based image.    #opis parametra
+    default: ubuntu_cloud14                                                        #vrijednost koja se uzima ako korisnik ne unese nista
+  flavor:                                                                          #parametar flavor
+    type: string                                                                   #tip parametra
+    label: Flavor                                                                  #oznaka parametra
+    description: Type of instance (flavor) to be used on the compute instance.     #opis parametra
+    default: m1.small                                                              #vrijednost koja se uzima ako korisnik ne unese nista
+  key:                                                                             #parametar key
+    type: string                                                                   #tip parametra
+    label: Key name                                                                #oznaka parametra
+    description: Name of key-pair to be installed on the compute instance.         #opis parametra
+    default: my_key1                                                               #vrijednost koja se uzima ako korisnik ne unese nista
+  private_network:                                                                 #parametar private_network
+    type: string                                                                   #tip parametra
+    label: Private network name or ID                                              #oznaka parametra
+    description: Network to attach server to.                                      #opis parametra 
+    default: my_net1                                                               #vrijednost koja se uzima ako korisnik ne unese nista
+
+resources:                                                                         #novi objekti (resursi) definirani nazivima 
+  mysql:                                                                           #naziv prvog resursa (instanca s bazom podataka)
+    type: https://raw.githubusercontent.com/nikoladom91/ARIKS2016/master/Skripte/Heat/resursi/mysql.yaml #pod-skripta, tj. vlastiti tip resursa koji sami definiramo (u ovom slucaju radi se o mysql bazi podataka)
+    properties:                                                                    #elementi ove sekcije prosljeduju se kao parametri pod-skripti (oni su nuzni kako bi se pod-skripta mogla ispravno izvrsiti)
+      image: { get_param: image }                                                  #dohvacanje parametra image i prosljedivanje istog pod-skripti
+      flavor: { get_param: flavor }                                                #dohvacanje parametra flavor i prosljedivanje istog pod-skripti
+      key: { get_param: key }                                                      #dohvacanje parametra key i prosljedivanje istog pod-skripti
+      private_network: { get_param: private_network }                              #dohvacanje parametra private_network i prosljedivanje istog pod-skripti
+      database_name: wordpress                                                     #parametar koji se prosljeduje pod-skripti a definira ime baze podataka
+      database_user: wordpress_user                                                #parametar koji se prosljeduje pod-skripti a definira korisnicko ime korisnika baze podataka
+  wordpress:                                                                       #naziv drugog resursa (instanca s wordpress web uslugom)
+    type: https://raw.githubusercontent.com/nikoladom91/ARIKS2016/master/Skripte/Heat/resursi/wordpress.yaml  #pod-skripta, tj. vlastiti tip resursa koji sami definiramo (u ovom slucaju radi se o wordpressu)
+    properties:                                                                    #elementi ove sekcije prosljeduju se kao parametri pod-skripti (oni su nuzni kako bi se pod-skripta mogla ispravno izvrsiti)
+      image: { get_param: image }                                                  #dohvacanje parametra image i prosljedivanje istog pod-skripti
+      flavor: { get_param: flavor }                                                #dohvacanje parametra flavor i prosljedivanje istog pod-skripti
+      key: { get_param: key }                                                      #dohvacanje parametra key i prosljedivanje istog pod-skripti
+      private_network: { get_param: private_network }                              #dohvacanje parametra private_network i prosljedivanje istog pod-skripti
+      mysql_server: { get_attr: [mysql, ip] }                                      #dohvacanje atributa baze podataka tocnije njene ip adrese i  prosljedivanje adrese pod-skripti
+      database_name: wordpress                                                     #parametar koji se prosljeduje pod-skripti a definira ime baze podataka
+      database_user: wordpress_user                                                #parametar koji se prosljeduje pod-skripti a definira korisnicko ime korisnika baze podataka
+      database_password: { get_attr: [mysql, database_password] }                  #dohvacanje atributa baze podataka tocnije korisnicke lozinke i  prosljedivanje lozinke pod-skripti

@@ -1,0 +1,97 @@
+heat_template_version: 2013-05-23                                                 #verzija sintakse koristena u skripti
+
+ #ovu skriptu pokrece nad-skripta a ona kreira php servis
+description: Template that installs a php service server.                          #opcionalni opis skripte
+ 
+parameters:                                                                        #u ovu sekciju kopiraju se argumenti preneseni iz nad-skripte                   
+  image:                                                                           #parametar image
+    type: string                                                                   #tip parametra
+    label: Image name or ID
+    description: Image to be used for server. Please use an Ubuntu based image.    #opis parametra
+  flavor:                                                                          #parametar image
+    type: string                                                                   #tip parametra
+    label: Flavor                                                                  #oznaka parametra
+    description: Type of instance (flavor) to be used on the compute instance.     #opis parametra
+  key:                                                                             #parametar image
+    type: string                                                                   #tip parametra
+    label: Key name                                                                #oznaka parametra
+    description: Name of key-pair to be installed on the compute instance.         #opis parametra
+  private_network:                                                                 #parametar image
+    type: string                                                                   #tip parametra
+    label: Private network name or ID                                              #oznaka parametra
+    description: Network to attach server to.                                      #opis parametra
+  public_network:                                                                  #parametar image
+    type: string                                                                   #tip parametra
+    label: Public network name or ID                                               #oznaka parametra
+    description: Network to attach server to.                                      #opis parametra
+  security_group:                                                                  #parametar image
+    type: string                                                                   #tip parametra
+    label: LAMP security group                                                     #oznaka parametra
+    description: Name of LAMP security group                                       #opis parametra
+ 
+resources:                                                                        #novi objekti (resursi) definirani nazivima 
+  wait_condition:                                                                 #resurs kojim se implementira mehanizam cekanja
+    type: OS::Heat::WaitCondition                                                 #tip resursa
+    properties:                                                                   #svojstva resursa
+      handle: { get_resource: wait_handle }                                       #element putem kojeg se rukuje ovim resursom
+      count: 1                                                                    #broj signala koje ocekujemo
+      timeout: 600                                                                #vrijeme nakon kojeg se resurs smatra uspjesno uspostavljenim ako nije primljen definirani broj signala
+ 
+  wait_handle:                                                                    #resurs koji kreira curl poziv koji se izvrsava unutar start-up skripte
+    type: OS::Heat::WaitConditionHandle                                           #tip resursa koji sluzi za rukovanje resursom wait_condition
+ 
+  port:                                                                           #definicija resursa koji specificira port
+    type: OS::Neutron::Port                                                       #tip resursa, servis za podesavanje porta iz modula neutron
+    properties:                                                                   #svojstva resursa
+      network: { get_param: private_network }                                     #mreza kojoj se pridodjeljuje port
+      security_groups:                                                            #sigurnosne grupe u koje spada port
+        - { get_param: security_group }                                           #sigurnosna grupa specificirana u nad-skripti
+        - default                                                                 #defaultna sigurnosna grupa
+
+      
+  service_instance:                                                               #resurs (instanca) u koju ce se putem bash skripte (start-up kod) postaviti php servis
+    type: OS::Nova::Server                                                        #tip resusrsa, nova server tj. kreiranje instance
+    properties:                                                                   #svojstva instance
+      image: { get_param: image }                                                 #image datoteka specificirana u nad-skripti
+      flavor: { get_param: flavor }                                               #flavor pecificiran u nad-skripti
+      key_name: { get_param: key }                                                #key datoteka specificirana u nad-skripti za ssh pristup na instancu
+      networks:                                                                   #specifikacija mreze
+        - port: { get_resource: port }                                            #dodjeljivanje prethodno specificiranog porta
+      user_data_format: RAW                                                       #tip start-up koda koji ce se izvrsiti prilikom pokretanja instance RAW- kod bez dodatnih modifikacija
+      user_data:                                                                  #definicija start-up koda koji postavlja php klijent
+        str_replace:
+          params:                                                                 #parametri koji se koriste za postavljanje php klijenta
+            wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }                  #dohvacanje prethodno kreiranog resursa za rukovanje mehanizmom cekanja
+          template: |                                                             #bash predlozak koji kreira php servis
+            #!/bin/bash
+            apt-get update
+            apt-get -y upgrade
+            sudo debconf-set-selections <<< 'lamp-server^ mysql-server/root_password password grad'
+            sudo debconf-set-selections <<< 'lamp-server^ mysql-server/root_password_again password grad'
+            apt-get -y install git
+            apt-get -y install lamp-server^
+            cd /var/www/html/
+            wget --no-check-certificate https://raw.githubusercontent.com/nikoladom91/ARIKS2016/master/Skripte/Heat/resursi/service.php
+            wget --no-check-certificate https://raw.githubusercontent.com/nikoladom91/ARIKS2016/master/Skripte/Heat/resursi/nusoap.php
+            
+            # notify heat that we are done here
+            wc_notify --data-binary '{"status": "SUCCESS"}'
+        
+  floating_ip:                                                                   #resurs koji specificira floating ip
+    type: OS::Neutron::FloatingIP                                                #tip resursa, neutronov floating ip
+    properties:                                                                  #svojstva resursa
+      floating_network: { get_param: public_network }                            #dohvacanje ip adrese javne mreze, specificirano u nad-skripti
+
+  floating_ip_assoc:                                                             #resurs koji asocira dohvacenu floating ip i specificirani port
+    type: OS::Neutron::FloatingIPAssociation                                     #tip resursa, neutronov FloatingIpAssociation
+    properties:                                                                  #svojstva resursa
+      floatingip_id: { get_resource: floating_ip }                               #dohvacanje floating ip-a specificirano u nad-skriptpi
+      port_id: { get_resource: port }                                            #dohvcanje prethodno kreiranog port
+
+outputs:                                                                         #izlazni podaci koji se ispisuju nakon uspjesnog stvaranja instance
+  name:                                                                          #izlaz naziv klijentske instance
+    description: Name of the Service instance.                                   #opis izlaza
+    value: { get_attr: [service_instance, name] }                                #dohvacanje atributa naziva
+  ip:                                                                            #izlaz floating ip
+    description: The IP address of the Service instance.                         #opis izlaza
+    value: { get_attr: [floating_ip, floating_ip_address] }                      #dohvacanje atributa floating_ip adresa

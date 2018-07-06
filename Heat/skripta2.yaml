@@ -1,0 +1,44 @@
+heat_template_version: 2013-05-23  #verzija sintakse koristena u skripti
+
+#za razliku od skripte skripta1.yaml ova skripta podatke potrebne za kreaciju instance preuzima 
+#od korisnika putem terminala
+description: Simple template to deploy a single compute instance  #opcionalni opis skripte
+
+parameters:                                                      #definicija parametara koje korisnik moze unjeti
+  image:                                                         #parametar image
+    type: string                                                 #tip parametra
+    label: Image name or ID                                      #oznaka parametra
+    description: Image to be used for compute instance           #opis parametra
+    default: ubuntu_cloud14                                      #vrijednost koja se uzima ako korisnik ne unese nista
+  flavor:                                                        #parametar flavor
+    type: string                                                 #tip parametra
+    label: Flavor                                                #oznaka parametra
+    description: Type of instance (flavor) to be used            #opis parametra
+    default: m1.small                                            #vrijednost koja se uzima ako korisnik ne unese nista
+  key:                                                           #parametar key
+    type: string                                                 #tip parametra
+    label: Key name                                              #oznaka parametra
+    description: Name of key-pair to be used for compute instance #opis parametra
+    default: my_key1                                             #vrijednost koja se uzima ako korisnik ne unese nista
+  private_network:                                               #parametar network
+    type: string                                                 #tip parametra
+    label: Private network name or ID                            #oznaka parametra
+    description: Network to attach instance to.                  #opis parametra
+    default: my_net1                                             #vrijednost koja se uzima ako korisnik ne unese nista
+
+
+resources:                                                       #novi objekt (resurs) definiran nazivom  my_instance
+  my_instance:                                                   #naziv objekta
+    type: OS::Nova::Server                                       #tip objekta-objekt koji ce kreirati instancu putem aplikacije nova
+    properties:                                                  #svojstva instance
+      image: { get_param: image }                                #dohvacanje parametra image i dodjeljivanje istog svojstvu image
+      flavor: { get_param: flavor }                              #dohvacanje parametra flavor i dodjeljivanje istog svojstvu flavor
+      key_name: { get_param: key }                               #dohvacanje parametra key i dodjeljivanje istog svojstvu key
+      networks:
+        - network: { get_param: private_network }          #dohvacanje parametra private_network i dodjeljivanje istog svojstvu network
+
+outputs:                                                         #informacija koja se prikazuje nakon izvrsavanja stacka
+  instance_ip:                                                   #jedini izlaz(output) komponente outputs
+    description: IP address of the instance                      #opis izlaza(outputa)
+    value: { get_attr: [my_instance, first_address] }            #dohvacanje atributa resursa(instance), tocnije njene ip adrese
+                                                                 #i spremanje u izlaznu (output) vrijednost

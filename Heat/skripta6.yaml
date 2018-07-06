@@ -1,0 +1,228 @@
+heat_template_version: 2013-05-23                                                #verzija sintakse koristena u skripti
+
+#ova srkipta korisi load balancer server koji kreira u pod-skripti lb_server.yaml
+#u svrhu kreiranja auto-scalinga za wordpress 
+#autoscaling omogucava alokaciju i dealokaciju resursa ovisno o trenutnim potrebama
+description: AutoScaling Wordpress                                               #opcionalni opis skripte
+
+parameters:                                                                      #definicija parametara koje korisnik moze unjeti    
+  image:                                                                         #parametar image
+    type: string                                                                 #tip parametra
+    description: Image used for servers                                          #opis parametra
+    default: ubuntu_cloud_14                                                     #vrijednost koja se uzima ako korisnik ne unese nista
+  key:                                                                           #parametar image
+    type: string                                                                 #tip parametra
+    description: SSH key to connect to the servers                               #opis parametra
+    default: UPI                                                                 #vrijednost koja se uzima ako korisnik ne unese nista
+  flavor:                                                                        #parametar image
+    type: string                                                                 #tip parametra
+    description: flavor used by the web servers                                  #opis parametra
+    default: m1.small                                                            #vrijednost koja se uzima ako korisnik ne unese nista
+  database_flavor:                                                               #parametar image
+    type: string                                                                 #tip parametra
+    description: flavor used by the db server                                    #opis parametra
+    default: m1.small                                                            #vrijednost koja se uzima ako korisnik ne unese nista
+  network:                                                                       #parametar image
+    type: string                                                                 #tip parametra
+    description: Network used by the server                                      #opis parametra
+    default: admin_internal_net                                                  #vrijednost koja se uzima ako korisnik ne unese nista
+  subnet_id:                                                                     #parametar image
+    type: string                                                                 #tip parametra
+    description: subnet on which the load balancer will be located               #opis parametra
+    default: admin_internal_net__subnet                                          #vrijednost koja se uzima ako korisnik ne unese nista
+  database_name:                                                                 #parametar image
+    type: string                                                                 #tip parametra
+    description: Name of the wordpress DB                                        #opis parametra
+    default: wordpress                                                           #vrijednost koja se uzima ako korisnik ne unese nista
+  database_user:                                                                 #parametar image
+    type: string                                                                 #tip parametra
+    description: Name of the wordpress user                                      #opis parametra
+    default: wordpress                                                           #vrijednost koja se uzima ako korisnik ne unese nista
+  external_network_id:                                                           #parametar image
+    type: string                                                                 #tip parametra
+    description: UUID of a Neutron external network                              #opis parametra
+    default: admin_floating_net                                                  #vrijednost koja se uzima ako korisnik ne unese nista
+
+resources:                                                                       #novi objekti (resursi) definirani nazivima
+  database_password:                                                             #random generirani pasword za bazu
+    type: OS::Heat::RandomString                                                 #tip resursa
+  database_root_password:                                                        #random generirani root pasword za bazu
+    type: OS::Heat::RandomString                                                 #tip resursa
+  db:                                                                            #instanca u koju se putem start-up koda instalira mariadb baza podataka
+    type: OS::Nova::Server                                                       #tip resursa
+    properties:                                                                  #svojstva instance
+      flavor: {get_param: database_flavor}                                       #dohvaca se koriscniki unos za flavor instance u kojoj je baza
+      image: {get_param: image}                                                  #dohvaca se koriscniki unos za image instance u kojoj je baza
+      key_name: {get_param: key}                                                 #dohvaca se koriscniki unos za naziv key datoteke instance u kojoj je baza
+      networks: [{network: {get_param: network} }]                               #dohvaca se koriscniki unos za naziv mreze instance u kojoj je baza
+      user_data_format: RAW                                                      #tip start-up koda koji ce se izvrsiti prilikom pokretanja instance RAW- kod bez dodatnih modifikacija
+      user_data:                                                                 #definicija start-up koda koji instalira maria-db
+        str_replace:
+          template: |
+            #!/bin/bash -v                                                       #bash skripta koja u instancu instalira maria-db server
+            yum -y install mariadb mariadb-server
+            systemctl enable mariadb.service
+            systemctl start mariadb.service
+            mysqladmin -u root password $db_rootpassword
+            cat << EOF | mysql -u root --password=$db_rootpassword
+            CREATE DATABASE $db_name;
+            GRANT ALL PRIVILEGES ON $db_name.* TO "$db_user"@"%"
+            IDENTIFIED BY "$db_password";
+            FLUSH PRIVILEGES;
+            EXIT
+            EOF
+          params:                                                              #parametri koji se koriste za specifikaciju baze
+            $db_rootpassword: {get_attr: [database_root_password, value]}      #dohvacanje root passworda baze 
+            $db_name: {get_param: database_name}                               #dohvacanje imena baze 
+            $db_user: {get_param: database_user}                               #dohvacanje korisnickog imena korisnika baze 
+            $db_password: {get_attr: [database_password, value]}               #dohvacanje passworda baze 
+  asg:                                                                         #resurs (instanca) koji ce automatski skalirati racunalne resurse
+    type: OS::Heat::AutoScalingGroup                                           #tip resursa Heat autoscaling group 
+    properties:                                                                #svojstva resursa
+      min_size: 1                                                              #minimalni broj jedinica
+      max_size: 3                                                              #maksimalni broj jedinica
+      resource:
+        type: https://raw.githubusercontent.com/nikoladom91/ARIKS2016/master/Skripte/Heat/resursi/lb_server.yaml #pod-skripta, tj. vlastiti tip resursa koji sami definiramo (u ovom slucaju radi se o load balancer serveru)
+        properties:                                                           #elementi ove sekcije prosljeduju se kao parametri pod-skripti (oni su nuzni kako bi se pod-skripta mogla ispravno izvrsiti)
+          flavor: {get_param: flavor}                                         #dohvacanje parametra flavor i prosljedivanje istog pod-skripti
+          image: {get_param: image}                                           #dohvacanje parametra image i prosljedivanje istog pod-skripti
+          key_name: {get_param: key}                                          #dohvacanje parametra key i prosljedivanje istog pod-skripti
+          network: {get_param: network}                                       #dohvacanje parametra network i prosljedivanje istog pod-skripti
+          pool_id: {get_resource: pool}                                       #dohvacanje parametra pool i prosljedivanje istog pod-skripti
+          metadata: {"metering.stack": {get_param: "OS::stack_id"}}           #dohvacanje parametra OS::stack_id i prosljedivanje istog pod-skripti
+          user_data:                                                          #definicija start-up koda
+            str_replace:
+              template: |
+                #!/bin/bash -v                                                 #bash predlozak koji konfigurira wordpress
+                yum -y install httpd wordpress
+                systemctl enable httpd.service
+                systemctl start httpd.service
+                setsebool -P httpd_can_network_connect_db=1
+
+                sed -i "/Deny from All/d" /etc/httpd/conf.d/wordpress.conf
+                sed -i "s/Require local/Require all granted/" /etc/httpd/conf.d/wordpress.conf
+                sed -i s/database_name_here/$db_name/ /etc/wordpress/wp-config.php
+                sed -i s/username_here/$db_user/ /etc/wordpress/wp-config.php
+                sed -i s/password_here/$db_password/ /etc/wordpress/wp-config.php
+                sed -i s/localhost/$db_host/ /etc/wordpress/wp-config.php
+
+                systemctl restart httpd.service
+              params:                                                         #parametri koji se koriste za spajanje na bazu
+                $db_name: {get_param: database_name}                          #dohvacanje naziva baze
+                $db_user: {get_param: database_user}                          #dohvacanje korisnickog imena korisnika baze
+                $db_password: {get_attr: [database_password, value]}          #dohvacanje passworda baze
+                $db_host: {get_attr: [db, first_address]}                     #dohvacanje ip-adrese baze
+  web_server_scaleup_policy:                                                  #definiranje pravila kada se skalira prema gore
+    type: OS::Heat::ScalingPolicy                                             #tip resursa kojim se definiraju pravila skaliranja
+    properties:                                                               #svojstva resursa
+      adjustment_type: change_in_capacity                                     #radi se o promjeni u kapacitetu servera                                     
+      auto_scaling_group_id: {get_resource: asg}                              #dohvacanje autoscaling group id-a
+      cooldown: 60                                                            #period 
+      scaling_adjustment: 1                                                   #povecaj za jedan
+  web_server_scaledown_policy:                                                #definiranje pravila kada se skalira prema dolje
+    type: OS::Heat::ScalingPolicy                                             #tip resursa kojim se definiraju pravila skaliranja
+    properties:                                                               #svojstva resursa
+      adjustment_type: change_in_capacity                                     #radi se o promjeni u kapacitetu servera
+      auto_scaling_group_id: {get_resource: asg}                              #dohvacanje autoscaling group id-a
+      cooldown: 60                                                            #period
+      scaling_adjustment: -1                                                  #smanji za jedan
+  cpu_alarm_high:                                                             #definicija celiometer alarma tj. kada je kriticna situacija i treba ici na scale-up
+    type: OS::Ceilometer::Alarm                                               #tip resursa
+    properties:                                                               #svojstva resursa                                                             
+      description: Scale-up if the average CPU > 50% for 1 minute             #opis resursa
+      meter_name: cpu_util                                                    #naziv mjeraca
+      statistic: avg                                                          #prosjecno koristenje cpu-a
+      period: 60                                                              #period od jedne minute
+      evaluation_periods: 1                                                   #jedan evaluacijski period
+      threshold: 50                                                           #postotak iskoristenosti cpu-a pri kojem se oglasava alarm
+      alarm_actions:
+        - {get_attr: [web_server_scaleup_policy, alarm_url]}                  #radi scale_up prema definiranim pravilima
+      matching_metadata: {'metadata.user_metadata.stack': {get_param: "OS::stack_id"}} #dohvacanje id-a stack-a
+      comparison_operator: gt                                                 #greater than (vise od 50% prosjecne koristenosti cpu-a)
+  cpu_alarm_low:                                                              #definicija celiometer alarma tj. kada je kriticna situacija i treba ici na scale-up
+    type: OS::Ceilometer::Alarm                                               #tip resursa
+    properties:                                                               #svojstva resursa 
+      description: Scale-down if the average CPU < 15% for 10 minutes         #opis resursa
+      meter_name: cpu_util                                                    #naziv mjeraca
+      statistic: avg                                                          #prosjecno koristenje cpu-a
+      period: 600                                                             #period od deset minuta
+      evaluation_periods: 1                                                   #jedan evaluacijski period
+      threshold: 15                                                           #postotak iskoristenosti cpu-a pri kojem se oglasava alarm      
+      alarm_actions:
+        - {get_attr: [web_server_scaledown_policy, alarm_url]}                #radi scale-down prema definiranim pravilima
+      matching_metadata: {'metadata.user_metadata.stack': {get_param: "OS::stack_id"}}   #dohvacanje id-a stack-a
+      comparison_operator: lt                                                 #lower than (manje od 15% prosjecne koristenosti cpu-a)
+  monitor:                                                                    #resurs koji definira nadzor nad potrebom za resursima
+    type: OS::Neutron::HealthMonitor                                          #tip resursa
+    properties:                                                               #svojstva resursa
+      type: TCP                                                               #tip resursa
+      delay: 5                                             
+      max_retries: 5
+      timeout: 5
+  pool:                                                                       #resurs koji definira dodjeljivanje pool-evima
+    type: OS::Neutron::Pool
+    properties:                                                               #svojstva resursa
+      protocol: HTTP                                                          #koristi se HTTP protokol
+      monitors: [{get_resource: monitor}]                                     #dohvacanje prethodno definiranog resursa za nadzor
+      subnet_id: {get_param: subnet_id}                                       #dohvacanje id-a podmreze
+      lb_method: ROUND_ROBIN                                                  #metoda balansiranja tereta
+      vip:
+        protocol_port: 80                                                     #port protokola
+  lb:                                                                         #definiramo load balancer od neutrona
+    type: OS::Neutron::LoadBalancer                                           #tip resursa
+    properties:                                                               #svojstva resursa
+      protocol_port: 80                                                       #radi na portu 80
+      pool_id: {get_resource: pool}                                           #dohvacanje id-a bazena
+
+  # dodijeli floating ip load balancer bazenu (pool)
+  lb_floating:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network_id: {get_param: external_network_id}                    #dohvacanje floating ip adrese
+      port_id: {get_attr: [pool, vip, port_id]}                                #dohvacanje id-a bazena, pool-a i porta protokola
+
+outputs:                                                                       # vrijdnosti koje se ispisuju za vrijeme auto scaling-a
+  scale_up_url:                                                                #svaka vrijednost opisana je u seciji description
+    description: >
+      This URL is the webhook to scale up the autoscaling group.  You
+      can invoke the scale-up operation by doing an HTTP POST to this
+      URL; no body nor extra headers are needed.
+    value: {get_attr: [web_server_scaleup_policy, alarm_url]}
+  scale_dn_url:
+    description: >
+      This URL is the webhook to scale down the autoscaling group.
+      You can invoke the scale-down operation by doing an HTTP POST to
+      this URL; no body nor extra headers are needed.
+    value: {get_attr: [web_server_scaledown_policy, alarm_url]}
+  pool_ip_address:
+    value: {get_attr: [pool, vip, address]}
+    description: The IP address of the load balancing pool
+  website_url:
+    value:
+      str_replace:
+        template: http://host/wordpress/
+        params:
+          host: { get_attr: [lb_floating, floating_ip_address] }
+    description: >
+      This URL is the "external" URL that can be used to access the
+      Wordpress site.
+  ceilometer_query:
+    value:
+      str_replace:
+        template: >
+          ceilometer statistics -m cpu_util
+          -q metadata.user_metadata.stack=stackval -p 600 -a avg
+        params:
+          stackval: { get_param: "OS::stack_id" }
+    description: >
+      This is a Ceilometer query for statistics on the cpu_util meter
+      Samples about OS::Nova::Server instances in this stack.  The -q
+      parameter selects Samples according to the subject's metadata.
+      When a VM's metadata includes an item of the form metering.X=Y,
+      the corresponding Ceilometer resource has a metadata item of the
+      form user_metadata.X=Y and samples about resources so tagged can
+      be queried with a Ceilometer query term of the form
+      metadata.user_metadata.X=Y.  In this case the nested stacks give
+      their VMs metadata that is passed as a nested stack parameter,
+      and this stack passes a metadata of the form metering.stack=Y,
+      where Y is this stack's ID.

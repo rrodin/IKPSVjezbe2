@@ -1,0 +1,140 @@
+heat_template_version: 2013-05-23   #verzija sintakse koristena u skripti
+
+#ovo je pod-skripta koju nad-skripta skripta4.yaml koristi za stvaranje baze podataka
+ 
+description: Template that installs a MySQL server with a database.                   #opcionalni opis skripte
+ 
+parameters:                                                                           #u ovu sekciju kopiraju se argumenti preneseni iz nad-skripte
+  image:                                                                              #parametar image
+    type: string                                                                      #tip parametra
+    label: Image name or ID                                                           #oznaka parametra
+    description: Image to be used for server. Please use an Ubuntu based image.       #opis parametra
+  flavor:                                                                             #parametar flavor
+    type: string                                                                      #tip parametra
+    label: Flavor                                                                     #oznaka parametra
+    description: Type of instance (flavor) to be used on the compute instance.        #opis parametra
+  key:                                                                                #parametar key
+    type: string                                                                      #tip parametra
+    label: Key name                                                                   #oznaka parametra
+    description: Name of key-pair to be installed on the compute instance.            #opis parametra
+  private_network:                                                                    #parametar private network
+    type: string                                                                      #tip parametra
+    label: Private network name or ID                                                 #oznaka parametra
+    description: Network to attach server to.                                         #opis parametra
+  database_name:                                                                      #parametar database_name
+    type: string                                                                      #tip parametra
+    label: Database name                                                              #oznaka parametra
+    description: Name of the application database.                                    #opis parametra
+  database_user:                                                                      #parametar database_user
+    type: string                                                                      #tip parametra
+    label: Database username                                                          #oznaka parametra
+    description: Name of the database user.                                           #opis parametra
+ 
+resources:                                                                            #novi objekti (resursi) definirani nazivima                  
+  wait_condition:                                                                     #resurs kojim se implementira mehanizam cekanja
+    type: OS::Heat::WaitCondition                                                     #tip resursa
+    properties:                                                                       #svojstva resursa
+      handle: { get_resource: wait_handle }                                           #element putem kojeg se rukuje ovim resursom
+      count: 1                                                                        #broj signala koje ocekujemo
+      timeout: 600                                                                    #vrijeme nakon kojeg se resurs smatra uspjesno uspostavljenim ako nije primljen definirani broj signala
+ 
+  wait_handle:                                                                        #resurs koji kreira curl poziv koji se izvrsava unutar start-up skripte
+    type: OS::Heat::WaitConditionHandle                                               #tip resursa koji sluzi za rukovanje resursom wait_condition
+ 
+  mysql_root_password:                                                                #resurs koji generira random string (u ovom slucaju root password za bazu)
+    type: OS::Heat::RandomString
+    properties:                                                                       #svojstva random string generatora
+      length: 32                                                                      #duljina generiranog stringa
+      sequence: lettersdigits                                                         #tip znakova unutar stringa
+ 
+  database_password:                                                                  #resurs koji generira random string (u ovom slucaju password za bazu)
+    type: OS::Heat::RandomString
+    properties:                                                                       #svojstva random string generatora
+      length: 32                                                                      #duljina generiranog stringa
+      sequence: lettersdigits                                                         #tip znakova unutar stringa
+ 
+  security_group:                                                                     #resurs koji definira sigurnosnu grupu baze
+    type: OS::Neutron::SecurityGroup                                                  #tip resursa security_group, sigurnosna grupa neutron modula
+    properties:                                                                       #svojstva sigurnosne grupe
+      name: db_server_security_group                                                  #naziv grupe
+      rules:                                                                          #pravila grupe                              
+        - port_range_min: 3306                                                        #port range
+          port_range_max: 3306
+          protocol: tcp                                                               #protokol za ingress promet
+          direction: ingress                                                          #vrsta mreznog prometa, promet koji dolazi izvana
+        - port_range_min: 3306                                                        #port range
+          port_range_max: 3306
+          protocol: tcp                                                               #protokol za egress promet
+          direction: egress                                                           #vrsta mreznog prometa, promet koji iznutra ide prema van
+
+  port:                                                                               #definicija resursa koji specificira port
+    type: OS::Neutron::Port                                                           #tip resursa, servis za podesavanje porta iz modula neutron
+    properties:                                                                       #svojstva resursa
+      network: { get_param: private_network }                                         #mreza kojoj se pridodjeljuje port
+      security_groups:                                                                #sigurnosne grupe u koje spada port
+        - { get_resource: security_group }                                            #prethodno kreirana sigurnosna grupa
+        - default                                                                     #defaultna sigurnosna grupa
+      
+  mysql_instance:                                                                     #resurs (instanca) u koju ce se putem bash skripte (start-up kod) instalirati baza podataka 
+    type: OS::Nova::Server                                                            #tip resusrsa, nova server tj. kreiranje instance
+    properties:                                                                       #svojstva instance
+      image: { get_param: image }                                                     #image datoteka specificirana u nad-skripti
+      flavor: { get_param: flavor }                                                   #flavor pecificiran u nad-skripti
+      key_name: { get_param: key }                                                    #key datoteka specificirana u nad-skripti za ssh pristup na instancu
+      networks:                                                                       #specifikacija mreze
+        - port: { get_resource: port }                                                #dodjeljivanje prethodno specificiranog porta
+      user_data_format: RAW                                                           #tip start-up koda koji ce se izvrsiti prilikom pokretanja instance RAW- kod bez dodatnih modifikacija
+      user_data:                                                                      #definicija start-up koda koji instalira mysql bazu podatka
+        str_replace:
+          params:                                                                     #parametri koji se koriste za stvaranje baze
+            __mysql_root_password__: { get_attr: [mysql_root_password, value] }       #dohvacanje pretohodno generiranog random root pasworda 
+            __database_name__: { get_param: database_name }                           #dohvacanje imena baze
+            __database_user__: { get_param: database_user }                           #dohvacanje korisnickog imena 
+            __database_password__: { get_attr: [database_password, value] }           #dohvacanje prethodno generiranog random passworda baze
+            wc_notify: { get_attr: ['wait_handle', 'curl_cli'] }                      #dohvacanje prethodno kreiranog resursa za rukovanje mehanizmom cekanja
+          template: |                                                                 #predlozak bas skripte (start-up kod) koja instalira bazu               
+            #!/bin/bash
+
+            # install MySQL
+            echo "deb-src http://172.24.4.1/debs/ amd64/" > /etc/apt/source.list
+            apt-get update
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get install -y mysql-server
+ 
+            # configure MySQL root password
+            mysqladmin -u root password "__mysql_root_password__"
+ 
+            # listen on all network interfaces
+            sed -i "s/bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/my.cnf
+ 
+            # restart service
+            service mysql restart
+ 
+            # create wordpress database
+            mysql -u root --password="__mysql_root_password__" <<EOF
+            CREATE DATABASE __database_name__;
+            CREATE USER '__database_user__'@'localhost';
+            SET PASSWORD FOR '__database_user__'@'localhost'=PASSWORD("__database_password__");
+            GRANT ALL PRIVILEGES ON __database_name__.* TO '__database_user__'@'localhost' IDENTIFIED BY '__database_password__';
+            CREATE USER '__database_user__'@'%';
+            SET PASSWORD FOR '__database_user__'@'%'=PASSWORD("__database_password__");
+            GRANT ALL PRIVILEGES ON __database_name__.* TO '__database_user__'@'%' IDENTIFIED BY '__database_password__';
+            FLUSH PRIVILEGES;
+            EOF
+ 
+            # notify heat that we are done here
+            wc_notify --data-binary '{"status": "SUCCESS"}'
+
+outputs:                                                               #izlazni podaci koji se ispisuju nakon kreacije instance unutar koje je baza                       
+  name:                                                                #naziv instance
+    description: Name of the MySQL instance.
+    value: { get_attr: [mysql_instance, name] }
+  ip:                                                                  #ip adresa instance
+    description: The IP address of the MySQL instance.
+    value: { get_attr: [mysql_instance, first_address] }
+  port:                                                                #mrezni port instance
+    description: The network port of the MySQL instance.
+    value: { get_resource: port }
+  database_password:                                                   #password novokreirane mysql baze
+    description: The MySQL database password.
+    value: { get_attr: [database_password, value] }

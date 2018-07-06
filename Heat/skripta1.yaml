@@ -1,0 +1,14 @@
+heat_template_version: 2013-05-23   #verzija sintakse koristena u skripti
+
+#ova skripta stvara novu instancu koristeci resurs(objekt) specificiran nize
+description: Simple template to deploy a single compute instance  #opcionalni opis skripte
+
+resources:                    #novi objekt (resurs) definiran nazivom  my_instance
+  my_instance:                #naziv objekta
+    type: OS::Nova::Server    #tip objekta-objekt koji ce kreirati instancu putem aplikacije nova
+    properties:               #svojstva instance
+      image: ubuntu_cloud14   #image datoteka koja je prethodno kreirana
+      flavor: m1.small        #flavor odnosno kolicina racunalnih resusra koje ce instanca zauzeti
+      key_name: my_key1       #naziv jedinstvenog kljuca koji sluzi za spajanje na instancu putem ssh
+      networks:
+        - network: my_net1    #prethodno kreirana mreza unutar koje ce se nalaziti instanca
